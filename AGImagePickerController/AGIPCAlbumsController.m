@@ -17,10 +17,8 @@
 @interface AGIPCAlbumsController ()
 {
     NSMutableArray *_assetsGroups;
-    AGImagePickerController *_imagePickerController;
+    __ag_weak AGImagePickerController *_imagePickerController;
 }
-
-@property (ag_weak, nonatomic, readonly) NSMutableArray *assetsGroups;
 
 @end
 
@@ -31,7 +29,6 @@
 
 - (void)didChangeLibrary:(NSNotification *)notification;
 
-- (void)loadAssetsGroups;
 - (void)reloadData;
 
 - (void)cancelAction:(id)sender;
@@ -56,13 +53,20 @@
 }
 
 #pragma mark - Object Lifecycle
-
+static bool isInit;
 - (id)initWithImagePickerController:(AGImagePickerController *)imagePickerController
 {
     self = [super initWithStyle:UITableViewStylePlain];
     if (self)
     {
         self.imagePickerController = imagePickerController;
+        isInit = NO;
+        [self assetsGroups];
+//        
+//        // avoid deadlock on ios5, delay to handle in viewDidLoad, springox(20140612)
+//        if ([[[UIDevice currentDevice] systemVersion] floatValue] >= 6.f) {
+//            [self loadAssetsGroups];
+//        }
     }
     
     return self;
@@ -77,12 +81,8 @@
 }
 
 #pragma mark - View lifecycle
-
-- (void)viewWillAppear:(BOOL)animated
-{
-    [super viewWillAppear:animated];
-    
-    [self.navigationController setToolbarHidden:YES animated:YES];
+- (void) dealloc {
+    [self unregisterFromNotifications];
 }
 
 - (void)viewDidLoad
@@ -91,11 +91,31 @@
     
     // Fullscreen
     if (self.imagePickerController.shouldChangeStatusBarStyle) {
-        self.wantsFullScreenLayout = YES;
+        if ([[[UIDevice currentDevice] systemVersion] floatValue] < 7.f) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+            self.wantsFullScreenLayout = YES;
+#pragma clang diagnostic pop
+        }
     }
+    
+//  self.title = NSLocalizedStringWithDefaultValue(@"AGIPC.Albums", nil, [NSBundle mainBundle], @"Albums", nil);
+    
+    // Don't display title here
+    self.title = @"";
+    
+    // avoid deadlock on ios5, delay to handle in viewDidLoad, springox(20140612)
+//    if ([[[UIDevice currentDevice] systemVersion] floatValue] < 6.f) {
+//        [self loadAssetsGroups];
+//    }
     
     // Setup Notifications
     [self registerForNotifications];
+    
+    // fix for IOS6
+    if ([[[UIDevice currentDevice] systemVersion] floatValue] < 7.f) {
+        self.navigationController.navigationBar.translucent = NO;
+    }
     
     // Navigation Bar Items
     UIBarButtonItem *cancelButton = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemCancel target:self action:@selector(cancelAction:)];
@@ -110,22 +130,50 @@
     [self unregisterFromNotifications];
 }
 
+- (void)viewWillAppear:(BOOL)animated
+{
+    [super viewWillAppear:animated];
+    
+    [self.navigationController setToolbarHidden:YES animated:YES];
+}
+
 - (BOOL)shouldAutorotateToInterfaceOrientation:(UIInterfaceOrientation)interfaceOrientation
 {
     return YES;
 }
 
-- (NSUInteger)supportedInterfaceOrientations
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations
 {
     return UIInterfaceOrientationMaskAll;
+}
+
+- (void)pushFirstAssetsController
+{
+   // [self.navigationController popToRootViewControllerAnimated:NO];
+    
+    static int tryCount = 0;
+    @synchronized(self) {
+        if (0 < self.assetsGroups.count) {
+            AGIPCAssetsController *controller = [[AGIPCAssetsController alloc] initWithImagePickerController:self.imagePickerController andAssetsGroup:self.assetsGroups[0]];
+            self.navigationController.viewControllers = @[self, controller];
+            //[self.navigationController pushViewController:controller animated:NO];
+            
+            tryCount = 0;
+        } else {
+            if (tryCount < 3) {
+                [self performSelector:@selector(pushFirstAssetsController) withObject:nil afterDelay:0.8];
+                ++tryCount;
+            }
+        }
+    }
 }
 
 #pragma mark - UITableViewDataSource Methods
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
+    self.title = NSLocalizedStringWithDefaultValue(@"AGIPC.Loading", nil, [NSBundle mainBundle], @"相簿", nil);
     return self.assetsGroups.count;
-    self.title = NSLocalizedStringWithDefaultValue(@"AGIPC.Loading", nil, [NSBundle mainBundle], @"Loading...", nil);
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
@@ -142,10 +190,10 @@
     NSUInteger numberOfAssets = group.numberOfAssets;
     
     cell.textLabel.text = [NSString stringWithFormat:@"%@", [group valueForProperty:ALAssetsGroupPropertyName]];
-    cell.detailTextLabel.text = [NSString stringWithFormat:@"%d", numberOfAssets];
+    cell.detailTextLabel.text = [NSString stringWithFormat:@"%lu", (unsigned long)numberOfAssets];
     [cell.imageView setImage:[UIImage imageWithCGImage:[(ALAssetsGroup *)self.assetsGroups[indexPath.row] posterImage]]];
 	[cell setAccessoryType:UITableViewCellAccessoryDisclosureIndicator];
-	
+    
     return cell;
 }
 
@@ -178,46 +226,93 @@
             
             void (^assetGroupEnumerator)(ALAssetsGroup *, BOOL *) = ^(ALAssetsGroup *group, BOOL *stop) 
             {
-                if (group == nil) 
-                {
+                
+                if (group != nil && group.numberOfAssets == 0) {
                     return;
                 }
                 
-                if (weakSelf.imagePickerController.shouldShowSavedPhotosOnTop) {
-                    if ([[group valueForProperty:ALAssetsGroupPropertyType] intValue] == ALAssetsGroupSavedPhotos) {
-                        [self.assetsGroups insertObject:group atIndex:0];
-                    } else if ([[group valueForProperty:ALAssetsGroupPropertyType] intValue] > ALAssetsGroupSavedPhotos) {
-                        [self.assetsGroups insertObject:group atIndex:1];
-                    } else {
-                        [self.assetsGroups addObject:group];
+                if (group == nil)
+                {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        
+                    if ([self.assetsGroups count] > 0) {
+                        [self reloadData];
                     }
-                } else {
-                    [self.assetsGroups addObject:group];
+        
+                    [self notifyAssetsGroupReady];
+                });
+                    return;
                 }
                 
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    [self reloadData];
-                });
+                
+//                 if (weakSelf.imagePickerController.shouldShowSavedPhotosOnTop) {
+//                     if ([[group valueForProperty:ALAssetsGroupPropertyType] intValue] == ALAssetsGroupSavedPhotos) {
+//                         [self.assetsGroups insertObject:group atIndex:0];
+//                         [self notifyAssetsGroupReady];
+//                     } else if ([[group valueForProperty:ALAssetsGroupPropertyType] intValue] > ALAssetsGroupSavedPhotos) {
+//                         [self.assetsGroups insertObject:group atIndex:1];
+//                     } else {
+//                         [self.assetsGroups addObject:group];
+//                     }
+//                 } else {
+//                     [self.assetsGroups addObject:group];
+//                 }
+                
+                
+                @synchronized(weakSelf) {
+                    // optimize the sort algorithm by springox(20140327)
+                    int groupType = [[group valueForProperty:ALAssetsGroupPropertyType] intValue];
+                    if (weakSelf.imagePickerController.shouldShowSavedPhotosOnTop && groupType == ALAssetsGroupSavedPhotos) {
+                        [self.assetsGroups insertObject:group atIndex:0];
+                        [self notifyAssetsGroupReady];
+                    } else {
+                        NSUInteger index = 0;
+                        for (ALAssetsGroup *g in [NSArray arrayWithArray:self.assetsGroups]) {
+                            if (weakSelf.imagePickerController.shouldShowSavedPhotosOnTop && [[g valueForProperty:ALAssetsGroupPropertyType] intValue] == ALAssetsGroupSavedPhotos) {
+                                index++;
+                                continue;
+                            }
+                            if (groupType > [[g valueForProperty:ALAssetsGroupPropertyType] intValue]) {
+                                [self.assetsGroups insertObject:group atIndex:index];
+                                break;
+                            }
+                            index++;
+                        }
+                        if (![self.assetsGroups containsObject:group]) {
+                            [self.assetsGroups addObject:group];
+                        }
+                    }
+                }
             };
             
             void (^assetGroupEnumberatorFailure)(NSError *) = ^(NSError *error) {
-                NSLog(@"A problem occured. Error: %@", error.localizedDescription);
+               // NSLog(@"A problem occured. Error: %@", error.localizedDescription);
                 [self.imagePickerController performSelector:@selector(didFail:) withObject:error];
             };	
             
-            [[AGImagePickerController defaultAssetsLibrary] enumerateGroupsWithTypes:ALAssetsGroupAll
-                                   usingBlock:assetGroupEnumerator 
-                                 failureBlock:assetGroupEnumberatorFailure];
-            
+            [[AGImagePickerController defaultAssetsLibrary] enumerateGroupsWithTypes:ALAssetsGroupAll usingBlock:assetGroupEnumerator failureBlock:assetGroupEnumberatorFailure];
         }
         
     });
 }
 
+-(void)notifyAssetsGroupReady
+{
+    dispatch_async(dispatch_get_main_queue(), ^{
+    if (isInit == NO) {
+        if ([self.imagePickerController.delegate respondsToSelector:@selector(didFinishPushFirstController)]) {
+            self.title = @"相册";
+            [self.imagePickerController.delegate didFinishPushFirstController];
+            isInit = YES;
+        }
+    }
+});
+
+}
+
 - (void)reloadData
 {
     [self.tableView reloadData];
-    self.title = NSLocalizedStringWithDefaultValue(@"AGIPC.Albums", nil, [NSBundle mainBundle], @"Albums", nil);
 }
 
 - (void)cancelAction:(id)sender

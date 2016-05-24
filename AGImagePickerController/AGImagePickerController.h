@@ -38,6 +38,7 @@ shouldShowToolbarForManagingTheSelectionInSelectionMode:(AGImagePickerController
 - (void)agImagePickerController:(AGImagePickerController *)picker didFinishPickingMediaWithInfo:(NSArray *)info;
 - (void)agImagePickerController:(AGImagePickerController *)picker didFail:(NSError *)error;
 
+-(void)didFinishPushFirstController;
 @end
 
 @interface AGImagePickerController : UINavigationController
@@ -81,7 +82,11 @@ shouldShowToolbarForManagingTheSelectionInSelectionMode:(AGImagePickerController
 
 @property (nonatomic, readonly) AGImagePickerControllerSelectionMode selectionMode;
 
+@property (nonatomic, assign) BOOL userIsDenied;
+
 + (ALAssetsLibrary *)defaultAssetsLibrary;
+
++ (AGImagePickerController *)sharedInstance:(id)delegate;
 
 - (id)initWithDelegate:(id)delegate;
 - (id)initWithFailureBlock:(AGIPCDidFail)failureBlock
@@ -94,6 +99,10 @@ shouldChangeStatusBarStyle:(BOOL)shouldChangeStatusBarStyle
 toolbarItemsForManagingTheSelection:(NSArray *)toolbarItemsForManagingTheSelection
 andShouldShowSavedPhotosOnTop:(BOOL)shouldShowSavedPhotosOnTop;
 
+- (void)showFirstAssetsController;
+- (void)didFinishPickingAssets:(NSArray *)selectedAssets;
+- (void)didFail:(NSError *)error;
+- (void)didCancelPickingAssets;
 @end
 
 

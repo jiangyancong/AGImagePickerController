@@ -16,11 +16,16 @@
 #import "AGIPCGridCell.h"
 #import "AGIPCToolbarItem.h"
 
-@interface AGIPCAssetsController ()
+#import "AGImagePreviewController.h"
+#import "AGIPCPreviewController.h"
+
+@interface AGIPCAssetsController ()<AGIPCPreviewControllerDelegate>
 {
     ALAssetsGroup *_assetsGroup;
     NSMutableArray *_assets;
-    AGImagePickerController *_imagePickerController;
+    __ag_weak AGImagePickerController *_imagePickerController;
+    
+    UIInterfaceOrientation lastOrientation;
 }
 
 @property (nonatomic, strong) NSMutableArray *assets;
@@ -82,7 +87,8 @@
             _assetsGroup = theAssetsGroup;
             [_assetsGroup setAssetsFilter:[ALAssetsFilter allPhotos]];
 
-            [self reloadData];
+            // modified by springox(20140510)
+            //[self reloadData];
         }
     }
 }
@@ -124,17 +130,8 @@
         _assets = [[NSMutableArray alloc] init];
         self.assetsGroup = assetsGroup;
         self.imagePickerController = imagePickerController;
-        self.title = NSLocalizedStringWithDefaultValue(@"AGIPC.Loading", nil, [NSBundle mainBundle], @"Loading...", nil);
+        self.title = NSLocalizedStringWithDefaultValue(@"AGIPC.Loading", nil, [NSBundle mainBundle], @"相簿", nil);
         self.title = [self.assetsGroup valueForProperty:ALAssetsGroupPropertyName];
-        
-        self.tableView.allowsMultipleSelection = NO;
-        self.tableView.allowsSelection = NO;
-        self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
-        
-        // Navigation Bar Items
-        UIBarButtonItem *doneButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(doneAction:)];
-        doneButtonItem.enabled = NO;
-        self.navigationItem.rightBarButtonItem = doneButtonItem;
         
         // Setup toolbar items
         [self setupToolbarItems];
@@ -183,6 +180,26 @@
     return items;
 }
 
+- (CGFloat)tableView:(UITableView *)tableView heightForFooterInSection:(NSInteger)section
+{
+    return self.imagePickerController.itemRect.origin.y;
+}
+
+- (UIView *)tableView:(UITableView *)tableView viewForFooterInSection:(NSInteger)section
+{
+    UIView *view = [[UIView alloc] init];
+    // modified by springox(20141010)
+    //view.backgroundColor = [UIColor whiteColor];
+    view.backgroundColor = [UIColor clearColor];
+    return view;
+}
+
+- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    CGRect itemRect = self.imagePickerController.itemRect;
+    return itemRect.size.height + itemRect.origin.y;
+}
+
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
     static NSString *CellIdentifier = @"Cell";
@@ -200,15 +217,70 @@
     return cell;
 }
 
-- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
-{
-    CGRect itemRect = self.imagePickerController.itemRect;
-    return itemRect.size.height + itemRect.origin.y;
-}
-
 #pragma mark - View Lifecycle
 
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+    
+    // Fullscreen
+    if (self.imagePickerController.shouldChangeStatusBarStyle) {
+        if ([[[UIDevice currentDevice] systemVersion] floatValue] < 7.f) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+            self.wantsFullScreenLayout = YES;
+#pragma clang diagnostic pop
+        }
+    }
+    
+    self.tableView.allowsMultipleSelection = NO;
+    self.tableView.allowsSelection = NO;
+    self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
+    
+    // Navigation Bar Items
+    UIBarButtonItem *doneButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(doneAction:)];
+    doneButtonItem.enabled = NO;
+    self.navigationItem.rightBarButtonItem = doneButtonItem;
+    
+    lastOrientation = self.interfaceOrientation;
+    
+    // modified by springox(20140510)
+    [self reloadData];
+    
+    // Setup Notifications
+    [self registerForNotifications];
+    
+    // add by springox(20141105)
+    [AGIPCGridItem performSelector:@selector(resetNumberOfSelections)];
+}
+
+- (void)viewDidUnload
+{
+    [super viewDidUnload];
+    
+    // Destroy Notifications
+    [self unregisterFromNotifications];
+}
+
+- (void)viewWillAppear:(BOOL)animated
+{
+    [super viewWillAppear:animated];
+    
+    // modified by springox(20141105)
+    //// Reset the number of selections
+    //[AGIPCGridItem performSelector:@selector(resetNumberOfSelections)];
+    
+    if (lastOrientation != self.interfaceOrientation) {
+        [self reloadData];
+    }
+}
+
 - (BOOL)shouldAutorotateToInterfaceOrientation:(UIInterfaceOrientation)interfaceOrientation
+{
+    return YES;
+}
+
+- (BOOL)shouldAutorotate
 {
     return YES;
 }
@@ -220,33 +292,12 @@
     [self reloadData];
 }
 
-- (void)viewWillAppear:(BOOL)animated
+// add by springox(20141024)
+- (void)didRotateFromInterfaceOrientation:(UIInterfaceOrientation)fromInterfaceOrientation
 {
-    // Reset the number of selections
-    [AGIPCGridItem performSelector:@selector(resetNumberOfSelections)];
+    [super didRotateFromInterfaceOrientation:fromInterfaceOrientation];
     
-    [super viewWillAppear:animated];
-}
-
-- (void)viewDidLoad
-{
-    [super viewDidLoad];
-    
-    // Fullscreen
-    if (self.imagePickerController.shouldChangeStatusBarStyle) {
-        self.wantsFullScreenLayout = YES;
-    }
-    
-    // Setup Notifications
-    [self registerForNotifications];
-}
-
-- (void)viewDidUnload
-{
-    [super viewDidUnload];
-    
-    // Destroy Notifications
-    [self unregisterFromNotifications];
+    [self reloadData];
 }
 
 #pragma mark - Private
@@ -306,18 +357,9 @@
                 
                 AGIPCGridItem *gridItem = [[AGIPCGridItem alloc] initWithImagePickerController:self.imagePickerController asset:result andDelegate:self];
                 
-                // Drawing must be exectued in main thread. springox(20131220)
-                /*
-                if (strongSelf.imagePickerController.selection != nil &&
-                    [strongSelf.imagePickerController.selection containsObject:result])
-                {
-                    gridItem.selected = YES;
-                }
-                 */
-                
-                //[strongSelf.assets addObject:gridItem];
                 // Descending photos, springox(20131225)
-                [strongSelf.assets insertObject:gridItem atIndex:0];
+                [strongSelf.assets addObject:gridItem];
+                //[strongSelf.assets insertObject:gridItem atIndex:0];
 
             }];
         }
@@ -341,13 +383,12 @@
     //[self setTitle:[self.assetsGroup valueForProperty:ALAssetsGroupPropertyName]];
     [self changeSelectionInformation];
     
-    /*
+    
     NSInteger totalRows = [self.tableView numberOfRowsInSection:0];
     //Prevents crash if totalRows = 0 (when the album is empty).
     if (totalRows > 0) {
         [self.tableView scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:totalRows-1 inSection:0] atScrollPosition:UITableViewScrollPositionBottom animated:NO];
     }
-     */
 }
 
 - (void)doneAction:(id)sender
@@ -398,14 +439,18 @@
         } else {
             //self.navigationController.navigationBar.topItem.prompt = [NSString stringWithFormat:@"(%d/%d)", [AGIPCGridItem numberOfSelections], self.assets.count];
             // Display supports up to select several photos at the same time, springox(20131220)
+
             NSInteger maxNumber = _imagePickerController.maximumNumberOfPhotosToBeSelected;
             if (0 < maxNumber) {
-                self.navigationController.navigationBar.topItem.prompt = [NSString stringWithFormat:@"(%d/%d)", [AGIPCGridItem numberOfSelections], maxNumber];
+                self.navigationController.navigationBar.topItem.prompt = [NSString stringWithFormat:@"(%lu/%ld)", (unsigned long)[AGIPCGridItem numberOfSelections], (long)maxNumber];
             } else {
-                self.navigationController.navigationBar.topItem.prompt = [NSString stringWithFormat:@"(%d/%d)", [AGIPCGridItem numberOfSelections], self.assets.count];
+                self.navigationController.navigationBar.topItem.prompt = [NSString stringWithFormat:@"(%lu/%lu)", (unsigned long)[AGIPCGridItem numberOfSelections], (unsigned long)self.assets.count];
             }
         }
     }
+
+
+    
 }
 
 #pragma mark - AGGridItemDelegate Methods
@@ -422,14 +467,49 @@
         for (AGIPCGridItem *item in self.assets)
             if (item.selected)
                 item.selected = NO;
-        
         return YES;
     } else {
-        if (self.imagePickerController.maximumNumberOfPhotosToBeSelected > 0)
-            return ([AGIPCGridItem numberOfSelections] < self.imagePickerController.maximumNumberOfPhotosToBeSelected);
+        if (self.imagePickerController.maximumNumberOfPhotosToBeSelected > 0) {
+            if ([AGIPCGridItem numberOfSelections] < self.imagePickerController.maximumNumberOfPhotosToBeSelected)
+            {
+                return YES;
+            } else {
+                //如果超过限制，弹出alertView
+                UIAlertView *alert = [[UIAlertView alloc]initWithTitle:nil message:[NSString stringWithFormat:@"你最多只能选择%lu张图片",(unsigned long)_imagePickerController.maximumNumberOfPhotosToBeSelected] delegate:nil cancelButtonTitle:@"我知道了" otherButtonTitles:nil, nil];
+                [alert show];
+                return NO;
+            
+            }
+        
+        }
         else
             return YES;
     }
+}
+
+
+//不显示大图
+// add by springox(20141023)
+//- (void)agGridItemDidTapAction:(AGIPCGridItem *)gridItem
+//{
+//    // mark the original orientation, springox(20141109)
+//    lastOrientation = self.interfaceOrientation;
+//    
+//    AGIPCPreviewController *preController = [[AGIPCPreviewController alloc] initWithAssets:self.assets targetAsset:gridItem];
+//    preController.delegate = self;
+//    preController.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
+//    [self.navigationController presentViewController:preController animated:YES completion:^{
+//        // do nothing
+//    }];
+//}
+
+
+
+#pragma mark - AGIPCPreviewControllerDelegate Methods
+
+- (void)previewController:(AGIPCPreviewController *)pVC didRotateFromOrientation:(UIInterfaceOrientation)fromOrientation
+{
+    // do noting
 }
 
 #pragma mark - Notifications
@@ -456,7 +536,7 @@
 
 - (void)didChangeToolbarItemsForManagingTheSelection:(NSNotification *)notification
 {
-    NSLog(@"here.");
+   // NSLog(@"here.");
 }
 
 @end
