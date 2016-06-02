@@ -145,7 +145,7 @@
 
 - (void)dealloc
 {
-    [self unregisterFromNotifications];
+    //[self unregisterFromNotifications];
 }
 
 #pragma mark - UITableViewDataSource Methods
@@ -247,8 +247,8 @@
     // modified by springox(20140510)
     [self reloadData];
     
-    // Setup Notifications
-    [self registerForNotifications];
+    // Setup Notifications 2016.06.02通知容易引起闪退
+    //[self registerForNotifications];
     
     // add by springox(20141105)
     [AGIPCGridItem performSelector:@selector(resetNumberOfSelections)];

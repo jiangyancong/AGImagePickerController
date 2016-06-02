@@ -82,7 +82,7 @@ static bool isInit;
 
 #pragma mark - View lifecycle
 - (void) dealloc {
-    [self unregisterFromNotifications];
+    //[self unregisterFromNotifications];
 }
 
 - (void)viewDidLoad
@@ -109,8 +109,8 @@ static bool isInit;
 //        [self loadAssetsGroups];
 //    }
     
-    // Setup Notifications
-    [self registerForNotifications];
+    // Setup Notifications 2016.06.02通知容易引起闪退
+    //[self registerForNotifications];
     
     // fix for IOS6
     if ([[[UIDevice currentDevice] systemVersion] floatValue] < 7.f) {
@@ -120,14 +120,6 @@ static bool isInit;
     // Navigation Bar Items
     UIBarButtonItem *cancelButton = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemCancel target:self action:@selector(cancelAction:)];
 	self.navigationItem.leftBarButtonItem = cancelButton;
-}
-
-- (void)viewDidUnload
-{
-    [super viewDidUnload];
-    
-    // Destroy Notifications
-    [self unregisterFromNotifications];
 }
 
 - (void)viewWillAppear:(BOOL)animated
@@ -218,10 +210,10 @@ static bool isInit;
 {
     __ag_weak AGIPCAlbumsController *weakSelf = self;
     
-    [self.assetsGroups removeAllObjects];
+
     
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
-        
+        [weakSelf.assetsGroups removeAllObjects];
         @autoreleasepool {
             
             void (^assetGroupEnumerator)(ALAssetsGroup *, BOOL *) = ^(ALAssetsGroup *group, BOOL *stop) 
@@ -235,11 +227,11 @@ static bool isInit;
                 {
                     dispatch_async(dispatch_get_main_queue(), ^{
                         
-                    if ([self.assetsGroups count] > 0) {
-                        [self reloadData];
+                    if ([weakSelf.assetsGroups count] > 0) {
+                        [weakSelf reloadData];
                     }
         
-                    [self notifyAssetsGroupReady];
+                    [weakSelf notifyAssetsGroupReady];
                 });
                     return;
                 }
@@ -258,13 +250,19 @@ static bool isInit;
 //                     [self.assetsGroups addObject:group];
 //                 }
                 
-                
+                //[weakSelf.assetsGroups addObject:group];
                 @synchronized(weakSelf) {
                     // optimize the sort algorithm by springox(20140327)
                     int groupType = [[group valueForProperty:ALAssetsGroupPropertyType] intValue];
                     if (weakSelf.imagePickerController.shouldShowSavedPhotosOnTop && groupType == ALAssetsGroupSavedPhotos) {
-                        [self.assetsGroups insertObject:group atIndex:0];
-                        [self notifyAssetsGroupReady];
+                        
+                        if ([self.assetsGroups count] > 0 && [[(ALAssetsGroup *)self.assetsGroups[0] valueForProperty:ALAssetsGroupPropertyType] intValue] == groupType) {
+                            [self.assetsGroups replaceObjectAtIndex:0 withObject:group];
+                        } else {
+                            [self.assetsGroups insertObject:group atIndex:0];
+                        }
+                        
+                        //[self notifyAssetsGroupReady];
                     } else {
                         NSUInteger index = 0;
                         for (ALAssetsGroup *g in [NSArray arrayWithArray:self.assetsGroups]) {
@@ -287,7 +285,7 @@ static bool isInit;
             
             void (^assetGroupEnumberatorFailure)(NSError *) = ^(NSError *error) {
                // NSLog(@"A problem occured. Error: %@", error.localizedDescription);
-                [self.imagePickerController performSelector:@selector(didFail:) withObject:error];
+                [weakSelf.imagePickerController performSelector:@selector(didFail:) withObject:error];
             };	
             
             [[AGImagePickerController defaultAssetsLibrary] enumerateGroupsWithTypes:ALAssetsGroupAll usingBlock:assetGroupEnumerator failureBlock:assetGroupEnumberatorFailure];
@@ -302,6 +300,7 @@ static bool isInit;
     if (isInit == NO) {
         if ([self.imagePickerController.delegate respondsToSelector:@selector(didFinishPushFirstController)]) {
             self.title = @"相册";
+            [self pushFirstAssetsController];
             [self.imagePickerController.delegate didFinishPushFirstController];
             isInit = YES;
         }

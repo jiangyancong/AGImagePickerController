@@ -37,7 +37,7 @@ static AGImagePickerController *_sharedInstance = nil;
         assetsLibrary = [[ALAssetsLibrary alloc] init];
         
         // Workaround for triggering ALAssetsLibraryChangedNotification
-        [assetsLibrary writeImageToSavedPhotosAlbum:nil metadata:nil completionBlock:^(NSURL *assetURL, NSError *error) { }];
+        //[assetsLibrary writeImageToSavedPhotosAlbum:nil metadata:nil completionBlock:^(NSURL *assetURL, NSError *error) { }];
     });
     
     return assetsLibrary;

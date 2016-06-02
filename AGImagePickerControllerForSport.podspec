@@ -5,7 +5,7 @@ Pod::Spec.new do |s|
   s.homepage     = "https://github.com/arturgrigor/AGImagePickerController"
   s.license      = 'MIT'
   s.author       = { "Artur Grigor" => "arturgrigor@gmail.com" }
-  s.source       = { :git => "https://github.com/jiangyancong/AGImagePickerController.git",
+  s.source       = { :git => "https://github.com/jiangyancong/AGImagePickerController",
                     :branch => 'master'
                     #:tag => s.version.to_s
                     }
